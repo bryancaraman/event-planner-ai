@@ -1,254 +1,137 @@
-import { OpenAI } from 'openai';
-import { AIContext, Event, Activity, AvailabilitySlot, User } from '@/types';
+import { Event, EventPreferences, ChatMessage, AIContext } from '@/types';
 
 export class AIEventPlannerService {
-  private client: OpenAI;
+  private apiKey: string;
+  private baseUrl: string;
 
   constructor() {
-    this.client = new OpenAI({
-      baseURL: process.env.NVIDIA_BASE_URL,
-      apiKey: process.env.NVIDIA_API_KEY,
-    });
+    this.apiKey = process.env.NVIDIA_API_KEY || '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';
+    this.baseUrl = 'https://integrate.api.nvidia.com/v1';
   }
 
-  async generateEventSuggestions(context: AIContext): Promise<string> {
-    const systemPrompt = `You are an expert event planning AI assistant. Your role is to help coordinate events by analyzing schedules, preferences, and available activities. Be helpful, creative, and considerate of everyone's needs.
-
-Context:
-- Event: ${context.event.title}
-- Participants: ${context.participants.length} people
-- Available time slots: ${context.availability.length}
-- Nearby activities: ${context.nearbyActivities.length}
-
-Guidelines:
-- Suggest optimal times based on participant availability
-- Recommend activities that match the group's preferences
-- Consider location, budget, and accessibility needs
-- Provide alternative options
-- Be conversational and engaging`;
-
-    const userPrompt = this.buildContextPrompt(context);
-
+  async processUserMessage(message: string, context: AIContext): Promise<string> {
     try {
-      const completion = await this.client.chat.completions.create({
-        model: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.6,
-        top_p: 0.95,
-        max_tokens: 2048,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        stream: false
+      const systemPrompt = this.buildSystemPrompt(context);
+      
+      const messages = [
+        { role: 'system', content: systemPrompt },
+        ...context.chatHistory.slice(-10).map(msg => ({
+          role: msg.type === 'user' ? 'user' : 'assistant',
+          content: msg.content
+        })),
+        { role: 'user', content: message }
+      ];
+
+      const response = await fetch(`${this.baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+        body: JSON.stringify({
+          model: 'nvidia/llama-3.3-nemotron-super-49b-v1.5',
+          messages,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_tokens: 500,
+          frequency_penalty: 0,
+          presence_penalty: 0,
+          stream: false
+        }),
       });
 
-      return completion.choices[0]?.message?.content || "I'd be happy to help plan your event! Could you provide more details about what you're looking for?";
-    } catch (error) {
-      console.error('Error generating AI suggestions:', error);
-      throw new Error('Failed to generate event suggestions');
-    }
-  }
-
-  async processUserMessage(
-    message: string,
-    context: AIContext
-  ): Promise<string> {
-    const systemPrompt = `You are an AI event planning assistant. The user is discussing an event they're planning. Help them by:
-
-1. Understanding their needs and preferences
-2. Suggesting optimal meeting times based on participant availability
-3. Recommending activities and locations
-4. Addressing concerns about the current plan
-5. Helping coordinate with other participants
-
-Current event context:
-- Title: ${context.event.title}
-- Description: ${context.event.description || 'No description provided'}
-- Status: ${context.event.status}
-- Participants: ${context.participants.map(p => p.name).join(', ')}
-- Location: ${context.event.location?.address || 'Not specified'}
-
-Be conversational, helpful, and provide actionable suggestions.`;
-
-    const conversationHistory = context.chatHistory
-      .slice(-10) // Last 10 messages for context
-      .map(msg => `${msg.type === 'user' ? 'User' : 'Assistant'}: ${msg.content}`)
-      .join('\n');
-
-    const userPrompt = `Previous conversation:
-${conversationHistory}
-
-Current situation:
-${this.buildContextPrompt(context)}
-
-User message: ${message}
-
-Please respond helpfully and suggest next steps for planning this event.`;
-
-    try {
-      const completion = await this.client.chat.completions.create({
-        model: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.6,
-        top_p: 0.95,
-        max_tokens: 1024,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        stream: false
-      });
-
-      return completion.choices[0]?.message?.content || "I'm here to help with your event planning! Could you tell me more about what you need?";
-    } catch (error) {
-      console.error('Error processing user message:', error);
-      throw new Error('Failed to process message');
-    }
-  }
-
-  async streamResponse(
-    message: string,
-    context: AIContext,
-    onChunk: (chunk: string) => void
-  ): Promise<void> {
-    const systemPrompt = `You are an AI event planning assistant helping coordinate events and schedules.`;
-    
-    const userPrompt = `${this.buildContextPrompt(context)}\n\nUser: ${message}`;
-
-    try {
-      const stream = await this.client.chat.completions.create({
-        model: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt }
-        ],
-        temperature: 0.6,
-        top_p: 0.95,
-        max_tokens: 1024,
-        frequency_penalty: 0,
-        presence_penalty: 0,
-        stream: true
-      });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          onChunk(content);
-        }
+      if (!response.ok) {
+        throw new Error(`AI API error: ${response.status}`);
       }
+
+      const data = await response.json();
+      return data.choices[0]?.message?.content || 'I apologize, but I had trouble processing your message. Could you please try again?';
     } catch (error) {
-      console.error('Error streaming AI response:', error);
-      throw new Error('Failed to stream response');
+      console.error('Error processing AI message:', error);
+      return 'I encountered an error while processing your message. Please try again or ask me something else about your event planning!';
     }
   }
 
-  async analyzeBestTimeSlots(
-    availability: AvailabilitySlot[],
-    preferences: any,
-    participants: User[]
-  ): Promise<{
-    recommended: AvailabilitySlot[];
-    reasoning: string;
-  }> {
-    const prompt = `Analyze these available time slots and recommend the best options:
+  private buildSystemPrompt(context: AIContext): string {
+    const { event, participants, nearbyActivities } = context;
+    
+    const hasLocationData = nearbyActivities && nearbyActivities.length > 0;
+    
+    return `You are a helpful event planning assistant. 
 
-Available slots:
-${availability.map((slot, i) => 
-  `${i + 1}. ${slot.start.toLocaleString()} - ${slot.end.toLocaleString()} (${slot.participants.length}/${participants.length} people available)`
+CRITICAL RULES - NEVER BREAK THESE:
+1. NEVER show thinking, reasoning, analysis, or process
+2. NEVER say "Let me think", "I'll analyze", "Based on my search", etc.
+3. NEVER explain HOW you came up with suggestions
+4. NEVER use phrases like "Here's what I found" or "After considering"
+5. Start responses immediately with helpful suggestions or questions
+
+${hasLocationData ? 
+  'You have real venue data from Google Maps. Use specific venue names.' : 
+  'You do not have real-time location data. Give general suggestions only.'}
+
+Event: "${event.title}"
+Participants: ${participants.length} people
+
+${hasLocationData ? `
+Real venues available:
+${nearbyActivities.slice(0, 5).map((activity, i) => 
+  `• ${activity.name} - ${activity.type} ${activity.rating ? `(${activity.rating}★)` : ''}`
 ).join('\n')}
+` : ''}
 
-Preferences:
-- Time of day: ${preferences.timeOfDay}
-- Activity types: ${preferences.activityTypes?.join(', ') || 'None specified'}
+Response style:
+- Start immediately with suggestions or questions
+- Maximum 2 short sentences
+- Be direct and helpful
+- Reference specific venue names if you have them
 
-Please recommend the top 3 time slots and explain your reasoning.`;
+GOOD examples:
+"Try [Venue Name] for dinner, then [Activity Name] for fun."
+"What city are you planning this in?"
+"Weekend afternoons work well - what dates work for everyone?"
 
+BAD examples (NEVER DO):
+"Let me think about this..."
+"I'm analyzing your options..."
+"Based on the data..."
+"Here are some suggestions I found..."
+"After considering the options..."`;
+  }
+
+  async generateEventSuggestions(event: Event, participants: any[]): Promise<string[]> {
     try {
-      const completion = await this.client.chat.completions.create({
-        model: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        messages: [
-          { role: "system", content: "You are an expert at analyzing schedules and making optimal recommendations." },
-          { role: "user", content: prompt }
-        ],
-        temperature: 0.3,
-        max_tokens: 512,
-        stream: false
+      const prompt = `Based on this event: "${event.title}" with ${participants.length} participants, suggest 5 specific activity ideas. Be brief and practical.`;
+      
+      const response = await this.processUserMessage(prompt, {
+        event,
+        participants,
+        availability: [],
+        nearbyActivities: [],
+        chatHistory: []
       });
 
-      const response = completion.choices[0]?.message?.content || '';
-      
-      // Sort slots by number of participants and time preferences
-      const sortedSlots = availability
-        .sort((a, b) => {
-          // Prioritize slots with more participants
-          if (b.participants.length !== a.participants.length) {
-            return b.participants.length - a.participants.length;
-          }
-          
-          // Then by time preferences
-          const aHour = a.start.getHours();
-          const bHour = b.start.getHours();
-          
-          if (preferences.timeOfDay === 'morning' && aHour < 12 && bHour >= 12) return -1;
-          if (preferences.timeOfDay === 'afternoon' && aHour >= 12 && aHour < 17 && (bHour < 12 || bHour >= 17)) return -1;
-          if (preferences.timeOfDay === 'evening' && aHour >= 17 && bHour < 17) return -1;
-          
-          return 0;
-        })
-        .slice(0, 3);
-
-      return {
-        recommended: sortedSlots,
-        reasoning: response
-      };
+      // Extract suggestions from response
+      return response.split('\n').filter(line => line.trim()).slice(0, 5);
     } catch (error) {
-      console.error('Error analyzing time slots:', error);
-      
-      // Fallback logic
-      const topSlots = availability
-        .sort((a, b) => b.participants.length - a.participants.length)
-        .slice(0, 3);
-        
-      return {
-        recommended: topSlots,
-        reasoning: "Based on participant availability, these are the optimal time slots."
-      };
+      console.error('Error generating suggestions:', error);
+      return ['Plan group activities', 'Find a venue', 'Coordinate schedules', 'Organize food/drinks', 'Set up entertainment'];
     }
   }
 
-  private buildContextPrompt(context: AIContext): string {
-    const { event, participants, availability, nearbyActivities } = context;
+  async analyzeBestTimeSlots(availabilitySlots: any[], preferences: EventPreferences): Promise<any[]> {
+    // Simplified implementation for now
+    return availabilitySlots.slice(0, 3);
+  }
+
+  async streamResponse(message: string, context: AIContext): Promise<AsyncIterable<string>> {
+    // For now, return the regular response as a single chunk
+    const response = await this.processUserMessage(message, context);
     
-    return `Event Planning Context:
-
-Event Details:
-- Title: ${event.title}
-- Description: ${event.description || 'No description'}
-- Duration: ${event.duration} minutes
-- Status: ${event.status}
-- Location: ${event.location?.address || 'Not specified'}
-
-Participants (${participants.length}):
-${participants.map(p => `- ${p.name} (${p.email})`).join('\n')}
-
-Available Time Slots (${availability.length}):
-${availability.slice(0, 5).map((slot, i) => 
-  `${i + 1}. ${slot.start.toLocaleDateString()} ${slot.start.toLocaleTimeString()} - ${slot.end.toLocaleTimeString()} (${slot.participants.length}/${participants.length} available)`
-).join('\n')}
-${availability.length > 5 ? `... and ${availability.length - 5} more slots` : ''}
-
-Nearby Activities (${nearbyActivities.length}):
-${nearbyActivities.slice(0, 5).map((activity, i) => 
-  `${i + 1}. ${activity.name} - ${activity.type} (${activity.rating ? activity.rating + ' stars' : 'No rating'})`
-).join('\n')}
-${nearbyActivities.length > 5 ? `... and ${nearbyActivities.length - 5} more activities` : ''}
-
-Preferences:
-- Time of day: ${event.preferences.timeOfDay}
-- Activity types: ${event.preferences.activityTypes.join(', ') || 'None specified'}
-- Budget: ${event.preferences.budget ? `$${event.preferences.budget.min} - $${event.preferences.budget.max}` : 'Not specified'}`;
+    async function* generateResponse() {
+      yield response;
+    }
+    
+    return generateResponse();
   }
 } 

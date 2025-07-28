@@ -1,38 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromToken } from '@/lib/firebase-admin';
 import { DatabaseService } from '@/lib/database';
-
-async function getAuthenticatedUser(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-  return await getUserFromToken(token);
-}
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const params = await context.params;
+    const { searchParams } = new URL(request.url);
+    const userEmail = searchParams.get('userEmail');
+
+    console.log('Fetching event:', params.id);
 
     const event = await DatabaseService.getEvent(params.id);
     if (!event) {
+      console.error('Event not found:', params.id);
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    // Check if user is a participant
-    const dbUser = await DatabaseService.getUserByEmail(user.email);
-    if (!dbUser || !event.participants.includes(dbUser.id)) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    // If userEmail is provided, check if user is a participant
+    if (userEmail) {
+      const user = await DatabaseService.getUserByEmail(userEmail);
+      if (user && !event.participants.includes(user.id)) {
+        console.error('User not a participant');
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
     }
 
+    console.log('Event found:', event.title);
     return NextResponse.json({ event });
   } catch (error) {
     console.error('Error fetching event:', error);
@@ -42,26 +37,25 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const params = await context.params;
+    const body = await request.json();
+    const { userEmail, ...updates } = body;
 
     const event = await DatabaseService.getEvent(params.id);
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    const dbUser = await DatabaseService.getUserByEmail(user.email);
-    if (!dbUser || !event.participants.includes(dbUser.id)) {
-      return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+    // If userEmail is provided, check if user is a participant
+    if (userEmail) {
+      const user = await DatabaseService.getUserByEmail(userEmail);
+      if (!user || !event.participants.includes(user.id)) {
+        return NextResponse.json({ error: 'Access denied' }, { status: 403 });
+      }
     }
-
-    const body = await request.json();
-    const updates = { ...body };
 
     // Handle date fields
     if (updates.preferredDates) {
@@ -83,22 +77,24 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
+    const params = await context.params;
+    const { searchParams } = new URL(request.url);
+    const userEmail = searchParams.get('userEmail');
 
     const event = await DatabaseService.getEvent(params.id);
     if (!event) {
       return NextResponse.json({ error: 'Event not found' }, { status: 404 });
     }
 
-    const dbUser = await DatabaseService.getUserByEmail(user.email);
-    if (!dbUser || event.creatorId !== dbUser.id) {
-      return NextResponse.json({ error: 'Only the event creator can delete this event' }, { status: 403 });
+    // If userEmail is provided, check if user is the creator
+    if (userEmail) {
+      const user = await DatabaseService.getUserByEmail(userEmail);
+      if (!user || event.creatorId !== user.id) {
+        return NextResponse.json({ error: 'Only the event creator can delete this event' }, { status: 403 });
+      }
     }
 
     await DatabaseService.deleteEvent(params.id);

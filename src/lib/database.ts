@@ -10,7 +10,8 @@ import {
   where, 
   orderBy, 
   limit,
-  Timestamp 
+  Timestamp,
+  getFirestore
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Event, User, ChatMessage } from '@/types';
@@ -93,19 +94,50 @@ export class DatabaseService {
   }
 
   // Event operations
-  static async createEvent(eventData: Omit<Event, 'id' | 'createdAt' | 'updatedAt' | 'shareLink'>): Promise<string> {
+  static async createEvent(eventData: any): Promise<string> {
     try {
-      const shareLink = uuidv4();
-      const eventWithMetadata = {
-        ...eventData,
-        shareLink,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        preferredDates: eventData.preferredDates.map(date => Timestamp.fromDate(date)),
-        finalizedDate: eventData.finalizedDate ? Timestamp.fromDate(eventData.finalizedDate) : null,
+      const db = getFirestore();
+      const eventsCollection = collection(db, 'events');
+
+      // Create the base event document with required fields
+      const eventDoc: any = {
+        title: eventData.title,
+        creatorId: eventData.creatorId,
+        participants: eventData.participants,
+        createdAt: Timestamp.fromDate(eventData.createdAt || new Date()),
+        shareLink: uuidv4(),
+        status: eventData.status || 'planning',
+        preferences: eventData.preferences || {
+          activityTypes: [],
+          budget: { min: 0, max: 1000 },
+          duration: 120,
+        },
+        activities: eventData.activities || [],
+        chatMessages: eventData.chatMessages || [],
       };
-      
-      const docRef = await addDoc(collection(db, 'events'), eventWithMetadata);
+
+      // Add optional fields only if they exist and are defined
+      if (eventData.description && eventData.description.trim()) {
+        eventDoc.description = eventData.description;
+      }
+
+      if (eventData.preferredDates && Array.isArray(eventData.preferredDates)) {
+        eventDoc.preferredDates = eventData.preferredDates.map((date: any) => Timestamp.fromDate(date));
+      }
+
+      if (eventData.duration && typeof eventData.duration === 'number') {
+        eventDoc.duration = eventData.duration;
+      }
+
+      if (eventData.location) {
+        eventDoc.location = eventData.location;
+      }
+
+      if (eventData.finalizedDate) {
+        eventDoc.finalizedDate = Timestamp.fromDate(eventData.finalizedDate);
+      }
+
+      const docRef = await addDoc(eventsCollection, eventDoc);
       return docRef.id;
     } catch (error) {
       console.error('Error creating event:', error);
@@ -120,14 +152,28 @@ export class DatabaseService {
       
       if (docSnap.exists()) {
         const data = docSnap.data();
-        return {
+        
+        // Create base event object with required fields
+        const event: any = {
           id: docSnap.id,
           ...data,
-          createdAt: data.createdAt.toDate(),
-          updatedAt: data.updatedAt.toDate(),
-          preferredDates: data.preferredDates.map((ts: Timestamp) => ts.toDate()),
-          finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
-        } as Event;
+          createdAt: data.createdAt?.toDate() || new Date(),
+        };
+
+        // Safely handle optional timestamp fields
+        if (data.updatedAt) {
+          event.updatedAt = data.updatedAt.toDate();
+        }
+
+        if (data.preferredDates && Array.isArray(data.preferredDates)) {
+          event.preferredDates = data.preferredDates.map((ts: Timestamp) => ts.toDate());
+        }
+
+        if (data.finalizedDate) {
+          event.finalizedDate = data.finalizedDate.toDate();
+        }
+
+        return event as Event;
       }
       
       return null;
@@ -164,14 +210,14 @@ export class DatabaseService {
 
   static async getUserEvents(userId: string): Promise<Event[]> {
     try {
+      // Simple query without ordering to avoid index requirement
       const q = query(
         collection(db, 'events'),
-        where('participants', 'array-contains', userId),
-        orderBy('updatedAt', 'desc')
+        where('participants', 'array-contains', userId)
       );
       
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => {
+      const events = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
@@ -182,6 +228,9 @@ export class DatabaseService {
           finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
         } as Event;
       });
+
+      // Sort on the client side instead of in the query
+      return events.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
     } catch (error) {
       console.error('Error getting user events:', error);
       throw new Error('Failed to get user events');

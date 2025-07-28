@@ -1,60 +1,46 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserFromToken } from '@/lib/firebase-admin';
 import { DatabaseService } from '@/lib/database';
-
-async function getAuthenticatedUser(request: NextRequest) {
-  const authHeader = request.headers.get('authorization');
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return null;
-  }
-
-  const token = authHeader.substring(7);
-  return await getUserFromToken(token);
-}
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-
     const body = await request.json();
-    const { title, description, location, preferredDates, duration, preferences } = body;
+    const { title, description, userEmail, userName } = body;
 
-    // Check if user exists in our database, create if not
-    let dbUser = await DatabaseService.getUserByEmail(user.email);
-    if (!dbUser) {
-      const userId = await DatabaseService.createUser({
-        email: user.email,
-        name: user.name,
-        picture: user.picture,
-      });
-      dbUser = await DatabaseService.getUser(userId);
+    if (!title || !userEmail) {
+      return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
     }
 
-    if (!dbUser) {
+    // Get or create user
+    let user = await DatabaseService.getUserByEmail(userEmail);
+    if (!user) {
+      const userId = await DatabaseService.createUser({
+        email: userEmail,
+        name: userName || 'Anonymous',
+      });
+      user = await DatabaseService.getUser(userId);
+    }
+
+    if (!user) {
       return NextResponse.json({ error: 'Failed to create user' }, { status: 500 });
     }
 
-    const eventData = {
+    // Create event with only defined fields
+    const eventData: any = {
       title,
-      description,
-      creatorId: dbUser.id,
-      participants: [dbUser.id],
-      location,
-      preferredDates: preferredDates.map((date: string) => new Date(date)),
-      duration: duration || 120,
-      preferences: preferences || {
-        timeOfDay: 'flexible',
+      creatorId: user.id,
+      participants: [user.id],
+      createdAt: new Date(),
+      preferences: {
         activityTypes: [],
-        accessibility: [],
-        dietaryRestrictions: [],
+        budget: { min: 0, max: 1000 },
+        duration: 120,
       },
-      activities: [],
-      chatMessages: [],
-      status: 'planning' as const,
     };
+
+    // Only add fields that are defined
+    if (description && description.trim()) {
+      eventData.description = description.trim();
+    }
 
     const eventId = await DatabaseService.createEvent(eventData);
     const event = await DatabaseService.getEvent(eventId);
@@ -68,17 +54,19 @@ export async function POST(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   try {
-    const user = await getAuthenticatedUser(request);
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const { searchParams } = new URL(request.url);
+    const userEmail = searchParams.get('userEmail');
+
+    if (!userEmail) {
+      return NextResponse.json({ error: 'User email required' }, { status: 400 });
     }
 
-    const dbUser = await DatabaseService.getUserByEmail(user.email);
-    if (!dbUser) {
+    const user = await DatabaseService.getUserByEmail(userEmail);
+    if (!user) {
       return NextResponse.json({ events: [] });
     }
 
-    const events = await DatabaseService.getUserEvents(dbUser.id);
+    const events = await DatabaseService.getUserEvents(user.id);
     return NextResponse.json({ events });
   } catch (error) {
     console.error('Error fetching events:', error);

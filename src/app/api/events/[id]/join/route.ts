@@ -1,16 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth/next';
-import { authOptions } from '@/lib/auth';
 import { DatabaseService } from '@/lib/database';
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
-    const session = await getServerSession(authOptions);
-    if (!session?.user?.email) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const params = await context.params;
+    const body = await request.json();
+    const { userEmail, userName } = body;
+
+    if (!userEmail) {
+      return NextResponse.json({ error: 'User email required' }, { status: 400 });
     }
 
     const event = await DatabaseService.getEvent(params.id);
@@ -19,12 +20,11 @@ export async function POST(
     }
 
     // Get or create user
-    let user = await DatabaseService.getUserByEmail(session.user.email);
+    let user = await DatabaseService.getUserByEmail(userEmail);
     if (!user) {
       const userId = await DatabaseService.createUser({
-        email: session.user.email,
-        name: session.user.name || 'Anonymous',
-        picture: session.user.image,
+        email: userEmail,
+        name: userName || 'Anonymous',
       });
       user = await DatabaseService.getUser(userId);
     }

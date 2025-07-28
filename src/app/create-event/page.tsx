@@ -2,305 +2,145 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Calendar, MapPin, Clock, Users, ArrowLeft } from 'lucide-react';
-import { useAuth } from '@/hooks/useAuth';
 import { AuthGuard } from '@/components/auth-guard';
+import { useAuth } from '@/hooks/useAuth';
+import { Calendar, ArrowLeft } from 'lucide-react';
 
-function CreateEventContent() {
+export default function CreateEvent() {
   const { user } = useAuth();
   const router = useRouter();
+  const [title, setTitle] = useState('');
+  const [description, setDescription] = useState('');
   const [loading, setLoading] = useState(false);
-  const [formData, setFormData] = useState({
-    title: '',
-    description: '',
-    location: '',
-    duration: 120,
-    preferredDates: [''],
-    preferences: {
-      timeOfDay: 'flexible',
-      activityTypes: [],
-      budget: { min: 0, max: 1000 },
-      accessibility: [],
-      dietaryRestrictions: [],
-    },
-  });
-
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
-
-  const handleDateChange = (index: number, value: string) => {
-    const newDates = [...formData.preferredDates];
-    newDates[index] = value;
-    setFormData(prev => ({ ...prev, preferredDates: newDates }));
-  };
-
-  const addDateOption = () => {
-    setFormData(prev => ({
-      ...prev,
-      preferredDates: [...prev.preferredDates, '']
-    }));
-  };
-
-  const removeDateOption = (index: number) => {
-    if (formData.preferredDates.length > 1) {
-      const newDates = formData.preferredDates.filter((_, i) => i !== index);
-      setFormData(prev => ({ ...prev, preferredDates: newDates }));
-    }
-  };
-
-  const handleActivityTypeChange = (activity: string) => {
-    const newTypes = formData.preferences.activityTypes.includes(activity)
-      ? formData.preferences.activityTypes.filter(t => t !== activity)
-      : [...formData.preferences.activityTypes, activity];
-    
-    setFormData(prev => ({
-      ...prev,
-      preferences: { ...prev.preferences, activityTypes: newTypes }
-    }));
-  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!title.trim() || !user?.email) return;
+
     setLoading(true);
 
     try {
-      const token = await user?.getIdToken();
       const response = await fetch('/api/events', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
         },
         body: JSON.stringify({
-          ...formData,
-          preferredDates: formData.preferredDates.filter(date => date !== ''),
+          title: title.trim(),
+          description: description.trim(),
+          userEmail: user.email,
+          userName: user.displayName || user.email,
         }),
       });
 
+      const data = await response.json();
+
       if (response.ok) {
-        const data = await response.json();
         router.push(`/events/${data.event.id}`);
       } else {
-        const error = await response.json();
-        console.error('Error creating event:', error);
+        console.error('Failed to create event:', data.error);
         alert('Failed to create event. Please try again.');
       }
     } catch (error) {
       console.error('Error creating event:', error);
-      alert('Failed to create event. Please try again.');
+      alert('An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
-  const activityTypes = [
-    'Dining', 'Entertainment', 'Outdoor Activities', 'Museums', 'Shopping',
-    'Sports', 'Arts & Culture', 'Nightlife', 'Tours', 'Wellness'
-  ];
-
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white shadow-sm border-b">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex items-center space-x-4">
-            <button
-              onClick={() => router.back()}
-              className="flex items-center space-x-2 text-gray-600 hover:text-gray-900 transition-colors"
-            >
-              <ArrowLeft className="h-5 w-5" />
-              <span>Back</span>
-            </button>
-            <h1 className="text-2xl font-bold text-gray-900">Create New Event</h1>
+    <AuthGuard>
+      <div className="min-h-screen bg-gray-50">
+        {/* Header */}
+        <header className="bg-white shadow-sm border-b">
+          <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center h-16">
+              <button
+                onClick={() => router.push('/dashboard')}
+                className="flex items-center text-gray-600 hover:text-gray-900 transition-colors mr-4"
+              >
+                <ArrowLeft className="h-5 w-5 mr-1" />
+                Back
+              </button>
+              <div className="flex items-center space-x-3">
+                <Calendar className="h-6 w-6 text-blue-600" />
+                <h1 className="text-xl font-semibold text-gray-900">Create New Event</h1>
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+        </header>
 
-      {/* Form */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <form onSubmit={handleSubmit} className="space-y-8">
-          {/* Basic Info */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4 flex items-center">
-              <Calendar className="h-5 w-5 mr-2" />
-              Event Details
-            </h2>
-            
-            <div className="space-y-4">
+        {/* Main Content */}
+        <main className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <div className="bg-white rounded-lg shadow-sm border">
+            <div className="p-6 border-b border-gray-200">
+              <h2 className="text-lg font-medium text-gray-900">Event Details</h2>
+              <p className="text-sm text-gray-600 mt-1">
+                Just give your event a name and description. Our AI will help you plan everything else!
+              </p>
+            </div>
+
+            <form onSubmit={handleSubmit} className="p-6 space-y-6">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
                   Event Title *
                 </label>
                 <input
                   type="text"
-                  name="title"
-                  value={formData.title}
-                  onChange={handleInputChange}
+                  id="title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="e.g., Team Building Day, Birthday Party, Weekend Getaway"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
                   required
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., Weekend Hangout, Birthday Celebration"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Description
+                <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+                  Description (Optional)
                 </label>
                 <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="Tell participants what this event is about..."
+                  id="description"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Any initial thoughts or requirements for this event..."
+                  rows={4}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
                 />
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <MapPin className="h-4 w-4 mr-1" />
-                    Location
-                  </label>
-                  <input
-                    type="text"
-                    name="location"
-                    value={formData.location}
-                    onChange={handleInputChange}
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="City, neighborhood, or address"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center">
-                    <Clock className="h-4 w-4 mr-1" />
-                    Duration (minutes)
-                  </label>
-                  <input
-                    type="number"
-                    name="duration"
-                    value={formData.duration}
-                    onChange={handleInputChange}
-                    min="30"
-                    max="1440"
-                    className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                </div>
+              <div className="bg-blue-50 border border-blue-200 rounded-md p-4">
+                <h3 className="text-sm font-medium text-blue-900 mb-2">What happens next?</h3>
+                <ul className="text-sm text-blue-800 space-y-1">
+                  <li>• You'll get a shareable link to invite friends</li>
+                  <li>• Everyone can chat with our AI to plan activities</li>
+                  <li>• The AI will coordinate schedules and suggest locations</li>
+                  <li>• All planning happens through natural conversation!</li>
+                </ul>
               </div>
-            </div>
-          </div>
 
-          {/* Preferred Dates */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Preferred Dates</h2>
-            
-            <div className="space-y-3">
-              {formData.preferredDates.map((date, index) => (
-                <div key={index} className="flex items-center space-x-2">
-                  <input
-                    type="datetime-local"
-                    value={date}
-                    onChange={(e) => handleDateChange(index, e.target.value)}
-                    className="flex-1 border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  {formData.preferredDates.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => removeDateOption(index)}
-                      className="text-red-600 hover:text-red-800 px-2 py-2"
-                    >
-                      Remove
-                    </button>
-                  )}
-                </div>
-              ))}
-              
-              <button
-                type="button"
-                onClick={addDateOption}
-                className="text-blue-600 hover:text-blue-800 text-sm font-medium"
-              >
-                + Add another date option
-              </button>
-            </div>
-          </div>
-
-          {/* Preferences */}
-          <div className="bg-white rounded-lg shadow p-6">
-            <h2 className="text-lg font-semibold mb-4">Preferences</h2>
-            
-            <div className="space-y-6">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Preferred Time of Day
-                </label>
-                <select
-                  value={formData.preferences.timeOfDay}
-                  onChange={(e) => setFormData(prev => ({
-                    ...prev,
-                    preferences: { ...prev.preferences, timeOfDay: e.target.value }
-                  }))}
-                  className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              <div className="flex justify-end space-x-3">
+                <button
+                  type="button"
+                  onClick={() => router.push('/dashboard')}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50 transition-colors"
                 >
-                  <option value="flexible">Flexible</option>
-                  <option value="morning">Morning</option>
-                  <option value="afternoon">Afternoon</option>
-                  <option value="evening">Evening</option>
-                </select>
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!title.trim() || loading}
+                  className="px-4 py-2 text-sm font-medium text-white bg-blue-600 border border-transparent rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {loading ? 'Creating...' : 'Create Event'}
+                </button>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Activity Types (select all that interest you)
-                </label>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                  {activityTypes.map((activity) => (
-                    <label key={activity} className="flex items-center space-x-2">
-                      <input
-                        type="checkbox"
-                        checked={formData.preferences.activityTypes.includes(activity)}
-                        onChange={() => handleActivityTypeChange(activity)}
-                        className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span className="text-sm">{activity}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
+            </form>
           </div>
-
-          {/* Submit */}
-          <div className="flex justify-end space-x-4">
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="px-6 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={loading || !formData.title}
-              className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center space-x-2"
-            >
-              {loading && <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>}
-              <span>{loading ? 'Creating...' : 'Create Event'}</span>
-            </button>
-          </div>
-        </form>
+        </main>
       </div>
-    </div>
-  );
-}
-
-export default function CreateEventPage() {
-  return (
-    <AuthGuard>
-      <CreateEventContent />
     </AuthGuard>
   );
 } 

@@ -11,15 +11,19 @@ const firebaseAdminConfig = {
   }),
 };
 
-const adminApp = getApps().length === 0 
-  ? initializeApp(firebaseAdminConfig, 'admin')
-  : getApps().find(app => app?.name === 'admin');
+const adminApp = getApps().find(app => app?.name === 'admin') || 
+  initializeApp(firebaseAdminConfig, 'admin');
 
 export const adminAuth = getAuth(adminApp);
 export const adminDb = getFirestore(adminApp);
 
 // Verify Firebase ID token
 export async function verifyFirebaseToken(token: string) {
+  if (!token) {
+    console.error('No token provided');
+    return null;
+  }
+
   try {
     const decodedToken = await adminAuth.verifyIdToken(token);
     return decodedToken;
@@ -33,7 +37,10 @@ export async function verifyFirebaseToken(token: string) {
 export async function getUserFromToken(token: string) {
   try {
     const decodedToken = await verifyFirebaseToken(token);
-    if (!decodedToken) return null;
+    if (!decodedToken) {
+      console.error('Failed to verify token');
+      return null;
+    }
 
     const user = await adminAuth.getUser(decodedToken.uid);
     return {
