@@ -20,7 +20,7 @@ interface ChatMessage {
   content: string;
   type: 'user' | 'ai' | 'system';
   userId?: string;
-  createdAt: string;
+  timestamp: string;
 }
 
 export default function EventPage() {
@@ -283,7 +283,7 @@ export default function EventPage() {
                       <div className={`text-xs mt-3 ${
                         message.type === 'user' ? 'text-blue-100' : 'text-gray-400'
                       }`}>
-                        {new Date(message.createdAt).toLocaleTimeString([], { 
+                        {new Date(message.timestamp).toLocaleTimeString([], { 
                           hour: '2-digit', 
                           minute: '2-digit' 
                         })}

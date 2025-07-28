@@ -1,34 +1,28 @@
 import { 
   collection, 
   doc, 
+  addDoc, 
   getDoc, 
   getDocs, 
-  addDoc, 
   updateDoc, 
   deleteDoc, 
   query, 
   where, 
-  orderBy, 
-  limit,
   Timestamp,
-  getFirestore
+  orderBy 
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Event, User, ChatMessage } from '@/types';
-import { v4 as uuidv4 } from 'uuid';
+import { User, Event, ChatMessage } from '@/types';
 
 export class DatabaseService {
   // User operations
-  static async createUser(userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  static async createUser(userData: Omit<User, 'id' | 'createdAt'>): Promise<string> {
     try {
-      const userWithTimestamps = {
+      const userRef = await addDoc(collection(db, 'users'), {
         ...userData,
         createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-      };
-      
-      const docRef = await addDoc(collection(db, 'users'), userWithTimestamps);
-      return docRef.id;
+      });
+      return userRef.id;
     } catch (error) {
       console.error('Error creating user:', error);
       throw new Error('Failed to create user');
@@ -37,53 +31,48 @@ export class DatabaseService {
 
   static async getUser(userId: string): Promise<User | null> {
     try {
-      const docRef = doc(db, 'users', userId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        return {
-          id: docSnap.id,
-          ...data,
-          createdAt: data.createdAt.toDate(),
-          updatedAt: data.updatedAt.toDate(),
-        } as User;
+      const userDoc = await getDoc(doc(db, 'users', userId));
+      if (!userDoc.exists()) {
+        return null;
       }
-      
-      return null;
+
+      const data = userDoc.data();
+      return {
+        id: userDoc.id,
+        ...data,
+        createdAt: data.createdAt.toDate(),
+      } as User;
     } catch (error) {
       console.error('Error getting user:', error);
-      throw new Error('Failed to get user');
+      return null;
     }
   }
 
   static async getUserByEmail(email: string): Promise<User | null> {
     try {
-      const q = query(collection(db, 'users'), where('email', '==', email), limit(1));
+      const q = query(collection(db, 'users'), where('email', '==', email));
       const querySnapshot = await getDocs(q);
       
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt.toDate(),
-          updatedAt: data.updatedAt.toDate(),
-        } as User;
+      if (querySnapshot.empty) {
+        return null;
       }
-      
-      return null;
+
+      const userDoc = querySnapshot.docs[0];
+      const data = userDoc.data();
+      return {
+        id: userDoc.id,
+        ...data,
+        createdAt: data.createdAt.toDate(),
+      } as User;
     } catch (error) {
       console.error('Error getting user by email:', error);
-      throw new Error('Failed to get user by email');
+      return null;
     }
   }
 
   static async updateUser(userId: string, updates: Partial<User>): Promise<void> {
     try {
-      const docRef = doc(db, 'users', userId);
-      await updateDoc(docRef, {
+      await updateDoc(doc(db, 'users', userId), {
         ...updates,
         updatedAt: Timestamp.now(),
       });
@@ -94,51 +83,41 @@ export class DatabaseService {
   }
 
   // Event operations
-  static async createEvent(eventData: any): Promise<string> {
+  static async createEvent(eventData: Omit<Event, 'id'>): Promise<string> {
     try {
-      const db = getFirestore();
-      const eventsCollection = collection(db, 'events');
-
-      // Create the base event document with required fields
-      const eventDoc: any = {
+      // Only include fields that are actually provided
+      const firestoreData: any = {
         title: eventData.title,
         creatorId: eventData.creatorId,
         participants: eventData.participants,
-        createdAt: Timestamp.fromDate(eventData.createdAt || new Date()),
-        shareLink: uuidv4(),
+        preferences: eventData.preferences,
+        shareLink: eventData.shareLink || this.generateShareLink(),
         status: eventData.status || 'planning',
-        preferences: eventData.preferences || {
-          activityTypes: [],
-          budget: { min: 0, max: 1000 },
-          duration: 120,
-        },
-        activities: eventData.activities || [],
-        chatMessages: eventData.chatMessages || [],
+        createdAt: Timestamp.now(),
       };
 
-      // Add optional fields only if they exist and are defined
-      if (eventData.description && eventData.description.trim()) {
-        eventDoc.description = eventData.description;
+      // Only add optional fields if they exist
+      if (eventData.description) {
+        firestoreData.description = eventData.description;
       }
-
-      if (eventData.preferredDates && Array.isArray(eventData.preferredDates)) {
-        eventDoc.preferredDates = eventData.preferredDates.map((date: any) => Timestamp.fromDate(date));
-      }
-
-      if (eventData.duration && typeof eventData.duration === 'number') {
-        eventDoc.duration = eventData.duration;
-      }
-
       if (eventData.location) {
-        eventDoc.location = eventData.location;
+        firestoreData.location = eventData.location;
       }
-
+      if (eventData.preferredDates && eventData.preferredDates.length > 0) {
+        firestoreData.preferredDates = eventData.preferredDates.map(date => Timestamp.fromDate(date));
+      }
+      if (eventData.duration) {
+        firestoreData.duration = eventData.duration;
+      }
+      if (eventData.activities) {
+        firestoreData.activities = eventData.activities;
+      }
       if (eventData.finalizedDate) {
-        eventDoc.finalizedDate = Timestamp.fromDate(eventData.finalizedDate);
+        firestoreData.finalizedDate = Timestamp.fromDate(eventData.finalizedDate);
       }
 
-      const docRef = await addDoc(eventsCollection, eventDoc);
-      return docRef.id;
+      const eventRef = await addDoc(collection(db, 'events'), firestoreData);
+      return eventRef.id;
     } catch (error) {
       console.error('Error creating event:', error);
       throw new Error('Failed to create event');
@@ -147,36 +126,20 @@ export class DatabaseService {
 
   static async getEvent(eventId: string): Promise<Event | null> {
     try {
-      const docRef = doc(db, 'events', eventId);
-      const docSnap = await getDoc(docRef);
-      
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        
-        // Create base event object with required fields
-        const event: any = {
-          id: docSnap.id,
-          ...data,
-          createdAt: data.createdAt?.toDate() || new Date(),
-        };
-
-        // Safely handle optional timestamp fields
-        if (data.updatedAt) {
-          event.updatedAt = data.updatedAt.toDate();
-        }
-
-        if (data.preferredDates && Array.isArray(data.preferredDates)) {
-          event.preferredDates = data.preferredDates.map((ts: Timestamp) => ts.toDate());
-        }
-
-        if (data.finalizedDate) {
-          event.finalizedDate = data.finalizedDate.toDate();
-        }
-
-        return event as Event;
+      const eventDoc = await getDoc(doc(db, 'events', eventId));
+      if (!eventDoc.exists()) {
+        return null;
       }
-      
-      return null;
+
+      const data = eventDoc.data();
+      return {
+        id: eventDoc.id,
+        ...data,
+        createdAt: data.createdAt.toDate(),
+        updatedAt: data.updatedAt ? data.updatedAt.toDate() : undefined,
+        preferredDates: data.preferredDates ? data.preferredDates.map((ts: Timestamp) => ts.toDate()) : [],
+        finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
+      } as Event;
     } catch (error) {
       console.error('Error getting event:', error);
       throw new Error('Failed to get event');
@@ -185,23 +148,23 @@ export class DatabaseService {
 
   static async getEventByShareLink(shareLink: string): Promise<Event | null> {
     try {
-      const q = query(collection(db, 'events'), where('shareLink', '==', shareLink), limit(1));
+      const q = query(collection(db, 'events'), where('shareLink', '==', shareLink));
       const querySnapshot = await getDocs(q);
       
-      if (!querySnapshot.empty) {
-        const doc = querySnapshot.docs[0];
-        const data = doc.data();
-        return {
-          id: doc.id,
-          ...data,
-          createdAt: data.createdAt.toDate(),
-          updatedAt: data.updatedAt.toDate(),
-          preferredDates: data.preferredDates.map((ts: Timestamp) => ts.toDate()),
-          finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
-        } as Event;
+      if (querySnapshot.empty) {
+        return null;
       }
-      
-      return null;
+
+      const eventDoc = querySnapshot.docs[0];
+      const data = eventDoc.data();
+      return {
+        id: eventDoc.id,
+        ...data,
+        createdAt: data.createdAt.toDate(),
+        updatedAt: data.updatedAt ? data.updatedAt.toDate() : undefined,
+        preferredDates: data.preferredDates ? data.preferredDates.map((ts: Timestamp) => ts.toDate()) : [],
+        finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
+      } as Event;
     } catch (error) {
       console.error('Error getting event by share link:', error);
       throw new Error('Failed to get event by share link');
@@ -210,27 +173,23 @@ export class DatabaseService {
 
   static async getUserEvents(userId: string): Promise<Event[]> {
     try {
-      // Simple query without ordering to avoid index requirement
-      const q = query(
-        collection(db, 'events'),
-        where('participants', 'array-contains', userId)
-      );
-      
+      const q = query(collection(db, 'events'), where('participants', 'array-contains', userId));
       const querySnapshot = await getDocs(q);
+      
       const events = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
           ...data,
           createdAt: data.createdAt.toDate(),
-          updatedAt: data.updatedAt.toDate(),
-          preferredDates: data.preferredDates.map((ts: Timestamp) => ts.toDate()),
+          updatedAt: data.updatedAt ? data.updatedAt.toDate() : undefined,
+          preferredDates: data.preferredDates ? data.preferredDates.map((ts: Timestamp) => ts.toDate()) : [],
           finalizedDate: data.finalizedDate ? data.finalizedDate.toDate() : undefined,
         } as Event;
       });
 
-      // Sort on the client side instead of in the query
-      return events.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+      // Sort by creation date (most recent first)
+      return events.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
     } catch (error) {
       console.error('Error getting user events:', error);
       throw new Error('Failed to get user events');
@@ -239,7 +198,6 @@ export class DatabaseService {
 
   static async updateEvent(eventId: string, updates: Partial<Event>): Promise<void> {
     try {
-      const docRef = doc(db, 'events', eventId);
       const updateData: any = {
         ...updates,
         updatedAt: Timestamp.now(),
@@ -253,23 +211,38 @@ export class DatabaseService {
         updateData.finalizedDate = Timestamp.fromDate(updates.finalizedDate);
       }
 
-      await updateDoc(docRef, updateData);
+      await updateDoc(doc(db, 'events', eventId), updateData);
     } catch (error) {
       console.error('Error updating event:', error);
       throw new Error('Failed to update event');
     }
   }
 
+  static async deleteEvent(eventId: string): Promise<void> {
+    try {
+      await deleteDoc(doc(db, 'events', eventId));
+    } catch (error) {
+      console.error('Error deleting event:', error);
+      throw new Error('Failed to delete event');
+    }
+  }
+
   static async addParticipantToEvent(eventId: string, userId: string): Promise<void> {
     try {
-      const event = await this.getEvent(eventId);
-      if (!event) {
+      const eventDoc = await getDoc(doc(db, 'events', eventId));
+      if (!eventDoc.exists()) {
         throw new Error('Event not found');
       }
 
-      if (!event.participants.includes(userId)) {
-        const updatedParticipants = [...event.participants, userId];
-        await this.updateEvent(eventId, { participants: updatedParticipants });
+      const data = eventDoc.data();
+      const participants = data.participants || [];
+      
+      if (!participants.includes(userId)) {
+        participants.push(userId);
+        await updateDoc(doc(db, 'events', eventId), {
+          participants,
+          updatedAt: Timestamp.now(),
+        });
       }
     } catch (error) {
       console.error('Error adding participant to event:', error);
@@ -277,47 +250,15 @@ export class DatabaseService {
     }
   }
 
-  static async removeParticipantFromEvent(eventId: string, userId: string): Promise<void> {
-    try {
-      const event = await this.getEvent(eventId);
-      if (!event) {
-        throw new Error('Event not found');
-      }
-
-      const updatedParticipants = event.participants.filter(id => id !== userId);
-      await this.updateEvent(eventId, { participants: updatedParticipants });
-    } catch (error) {
-      console.error('Error removing participant from event:', error);
-      throw new Error('Failed to remove participant from event');
-    }
-  }
-
   // Chat message operations
-  static async addChatMessage(
-    eventId: string,
-    message: Omit<ChatMessage, 'id' | 'timestamp'>
-  ): Promise<string> {
+  static async addChatMessage(eventId: string, messageData: Omit<ChatMessage, 'id' | 'timestamp'>): Promise<string> {
     try {
-      const messageWithTimestamp = {
-        ...message,
+      const messageRef = await addDoc(collection(db, 'chatMessages'), {
+        ...messageData,
         eventId,
         timestamp: Timestamp.now(),
-      };
-      
-      const docRef = await addDoc(collection(db, 'chatMessages'), messageWithTimestamp);
-      
-      // Also update the event's chatMessages array
-      const event = await this.getEvent(eventId);
-      if (event) {
-        const updatedMessages = [...event.chatMessages, {
-          id: docRef.id,
-          ...message,
-          timestamp: new Date(),
-        }];
-        await this.updateEvent(eventId, { chatMessages: updatedMessages });
-      }
-      
-      return docRef.id;
+      });
+      return messageRef.id;
     } catch (error) {
       console.error('Error adding chat message:', error);
       throw new Error('Failed to add chat message');
@@ -327,43 +268,33 @@ export class DatabaseService {
   static async getEventChatMessages(eventId: string): Promise<ChatMessage[]> {
     try {
       const q = query(
-        collection(db, 'chatMessages'),
-        where('eventId', '==', eventId),
-        orderBy('timestamp', 'asc')
+        collection(db, 'chatMessages'), 
+        where('eventId', '==', eventId)
       );
-      
       const querySnapshot = await getDocs(q);
-      return querySnapshot.docs.map(doc => {
+      
+      const messages = querySnapshot.docs.map(doc => {
         const data = doc.data();
         return {
           id: doc.id,
-          ...data,
+          eventId: data.eventId,
+          content: data.content,
+          type: data.type,
+          userId: data.userId,
           timestamp: data.timestamp.toDate(),
         } as ChatMessage;
       });
+
+      // Sort by creation time (oldest first)
+      return messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
     } catch (error) {
       console.error('Error getting chat messages:', error);
       throw new Error('Failed to get chat messages');
     }
   }
 
-  static async deleteEvent(eventId: string): Promise<void> {
-    try {
-      // Delete associated chat messages first
-      const messagesQuery = query(
-        collection(db, 'chatMessages'),
-        where('eventId', '==', eventId)
-      );
-      const messagesSnapshot = await getDocs(messagesQuery);
-      
-      const deletePromises = messagesSnapshot.docs.map(doc => deleteDoc(doc.ref));
-      await Promise.all(deletePromises);
-      
-      // Delete the event
-      await deleteDoc(doc(db, 'events', eventId));
-    } catch (error) {
-      console.error('Error deleting event:', error);
-      throw new Error('Failed to delete event');
-    }
+  // Utility methods
+  static generateShareLink(): string {
+    return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
   }
 } 

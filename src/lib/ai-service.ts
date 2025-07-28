@@ -53,50 +53,33 @@ export class AIEventPlannerService {
   }
 
   private buildSystemPrompt(context: AIContext): string {
-    const { event, participants, nearbyActivities } = context;
+    const { event, participants } = context;
     
-    const hasLocationData = nearbyActivities && nearbyActivities.length > 0;
-    
-    return `You are a helpful event planning assistant. 
+    return `You are a helpful event planning assistant. Give direct, practical responses. DO NOT show your thinking process, reasoning, or any internal thoughts.
 
-CRITICAL RULES - NEVER BREAK THESE:
-1. NEVER show thinking, reasoning, analysis, or process
-2. NEVER say "Let me think", "I'll analyze", "Based on my search", etc.
-3. NEVER explain HOW you came up with suggestions
-4. NEVER use phrases like "Here's what I found" or "After considering"
-5. Start responses immediately with helpful suggestions or questions
-
-${hasLocationData ? 
-  'You have real venue data from Google Maps. Use specific venue names.' : 
-  'You do not have real-time location data. Give general suggestions only.'}
+IMPORTANT: You do NOT have access to real-time Google Maps, calendar data, or live information. Base suggestions on general knowledge.
 
 Event: "${event.title}"
 Participants: ${participants.length} people
+Created: ${new Date(event.createdAt).toLocaleDateString()}
 
-${hasLocationData ? `
-Real venues available:
-${nearbyActivities.slice(0, 5).map((activity, i) => 
-  `• ${activity.name} - ${activity.type} ${activity.rating ? `(${activity.rating}★)` : ''}`
-).join('\n')}
-` : ''}
+Your responses should:
+- Be direct and actionable (1-2 sentences max)
+- Give specific suggestions when possible
+- Ask clarifying questions if you need more info
+- Never explain your reasoning or show thinking
+- Never mention accessing live data or APIs
 
-Response style:
-- Start immediately with suggestions or questions
-- Maximum 2 short sentences
-- Be direct and helpful
-- Reference specific venue names if you have them
+Examples of good responses:
+- "What city are you planning this in? I can suggest some popular venues."
+- "For a group of 5, consider dinner at a restaurant followed by mini golf or bowling."
+- "Weekend afternoons usually work well for group activities. What dates work for everyone?"
 
-GOOD examples:
-"Try [Venue Name] for dinner, then [Activity Name] for fun."
-"What city are you planning this in?"
-"Weekend afternoons work well - what dates work for everyone?"
-
-BAD examples (NEVER DO):
-"Let me think about this..."
-"I'm analyzing your options..."
-"Based on the data..."
-"Here are some suggestions I found..."
-"After considering the options..."`;
+Examples of BAD responses:
+- "Let me think about this..." 
+- "I'm analyzing the available options..."
+- "Based on my search of local venues..."
+- Any explanation of your process`;
   }
 
   async generateEventSuggestions(event: Event, participants: any[]): Promise<string[]> {

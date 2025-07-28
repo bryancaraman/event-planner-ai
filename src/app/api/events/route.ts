@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
       title,
       creatorId: user.id,
       participants: [user.id],
+      shareLink: DatabaseService.generateShareLink(),
+      status: 'planning',
       createdAt: new Date(),
       preferences: {
         activityTypes: [],
